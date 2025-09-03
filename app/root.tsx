@@ -17,6 +17,7 @@ import {
   useTheme,
 } from "remix-themes";
 import { themeSessionResolver } from "~/lib/theme.server";
+import { getServerEnv } from "~/env.server";
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -32,6 +33,8 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export async function loader({ request }: Route.LoaderArgs) {
+  // Validate server env early; throws on misconfiguration
+  getServerEnv();
   const { getTheme } = await themeSessionResolver(request);
   return { theme: getTheme() } as const;
 }
