@@ -1,8 +1,12 @@
 import { getServerEnv } from "~/env.server";
 import { adoFetchJson } from "~/services/http.server";
 import { getOrSet } from "~/services/cache.server";
-import { WiqlResponseSchema as ZWiqlResponse, WorkItemSchema as ZWorkItem } from "~/models/zod-ado";
-import type { WorkItem } from "~/models/zod-ado";
+import {
+  WiqlResponseSchema as ZWiqlResponse,
+  WorkItemSchema as ZWorkItem,
+  WorkItemUpdateSchema as ZWorkItemUpdate,
+} from "~/models/zod-ado";
+import type { WorkItem, WorkItemUpdate } from "~/models/zod-ado";
 
 // Small stable hash (FNV-1a 32-bit) for cache keys
 function hashString(input: string): string {
@@ -97,5 +101,53 @@ export class AdoClient {
       .sort((a, b) => (indexById.get(a.id)! - indexById.get(b.id)!));
 
     return ordered;
+  }
+
+  async listWorkItemUpdatesPaged(id: number): Promise<WorkItemUpdate[]> {
+    const cacheKey = `updates:${id}`;
+    return getOrSet<WorkItemUpdate[]>(cacheKey, this.ttlMs, async () => {
+      const all: WorkItemUpdate[] = [];
+      let continuationToken: string | undefined;
+      let safety = 0;
+
+      do {
+        let url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/workitems/${id}/updates?api-version=7.1`;
+        if (continuationToken) {
+          url += `&continuationToken=${encodeURIComponent(continuationToken)}`;
+        }
+
+        const json = await adoFetchJson<unknown>(url);
+
+        const pageArr: unknown = Array.isArray(json)
+          ? json
+          : (json as any)?.value && Array.isArray((json as any).value)
+          ? (json as any).value
+          : undefined;
+
+        if (!Array.isArray(pageArr)) {
+          throw new Error("Invalid WorkItemUpdates response shape");
+        }
+
+        for (const it of pageArr as unknown[]) {
+          all.push(ZWorkItemUpdate.parse(it));
+        }
+
+        const token = (json as any)?.continuationToken;
+        continuationToken = typeof token === "string" && token.length > 0 ? token : undefined;
+
+        safety++;
+        if (safety > 200) {
+          throw new Error("WorkItem updates paging exceeded safety limit");
+        }
+      } while (continuationToken);
+
+      all.sort((a, b) => {
+        const da = a.revisedDate ? Date.parse(a.revisedDate) : 0;
+        const db = b.revisedDate ? Date.parse(b.revisedDate) : 0;
+        return da - db;
+      });
+
+      return all;
+    });
   }
 }
