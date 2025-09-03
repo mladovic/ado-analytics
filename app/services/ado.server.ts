@@ -11,6 +11,7 @@ import {
   PRIterationSchema as ZPRIteration,
   PolicyEvaluationSchema as ZPolicyEvaluation,
   GraphUserSchema as ZGraphUser,
+  AreaNodeSchema as ZAreaNode,
 } from "~/models/zod-ado";
 import type {
   WorkItem,
@@ -20,6 +21,7 @@ import type {
   PRReviewer,
   PRIteration,
   PolicyEvaluation,
+  AreaNode,
 } from "~/models/zod-ado";
 
 // Centralized API versions
@@ -378,6 +380,25 @@ export class AdoClient {
       } while (continuationToken);
 
       return users;
+    });
+  }
+
+  /**
+   * List Area Paths tree for the project.
+   * - GET /{project}/_apis/wit/classificationnodes/Areas?$depth=depth&api-version=7.1
+   * - Validates with ZAreaNode
+   * - Caches under key `areas:$depth`
+   */
+  async listAreaPaths(depth = 5): Promise<AreaNode> {
+    const d = Math.max(1, Math.floor(depth));
+    const cacheKey = `areas:${d}`;
+    return getOrSet<AreaNode>(cacheKey, this.ttlMs, async () => {
+      const params = new URLSearchParams();
+      params.set("$depth", String(d));
+      params.set("api-version", API.wit);
+      const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/classificationnodes/Areas?${params.toString()}`;
+      const json = await adoFetchJson<unknown>(url);
+      return ZAreaNode.parse(json);
     });
   }
 }
