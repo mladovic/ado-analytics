@@ -9,8 +9,17 @@ import {
   PRThreadSchema as ZPRThread,
   PRReviewerSchema as ZPRReviewer,
   PRIterationSchema as ZPRIteration,
+  PolicyEvaluationSchema as ZPolicyEvaluation,
 } from "~/models/zod-ado";
-import type { WorkItem, WorkItemUpdate, PullRequest, PRThread, PRReviewer, PRIteration } from "~/models/zod-ado";
+import type {
+  WorkItem,
+  WorkItemUpdate,
+  PullRequest,
+  PRThread,
+  PRReviewer,
+  PRIteration,
+  PolicyEvaluation,
+} from "~/models/zod-ado";
 
 // Small stable hash (FNV-1a 32-bit) for cache keys
 function hashString(input: string): string {
@@ -290,6 +299,26 @@ export class AdoClient {
         .filter((n): n is number => typeof n === "number");
 
       return ids;
+    });
+  }
+
+  async listPolicyEvaluations(projectId: string, prId: number): Promise<PolicyEvaluation[]> {
+    const cacheKey = `policies:${projectId}:${prId}`;
+    return getOrSet<PolicyEvaluation[]>(cacheKey, this.ttlMs, async () => {
+      const artifactId = `vstfs:///CodeReview/CodeReviewId/${projectId}/${prId}`;
+      const params = new URLSearchParams();
+      params.set("artifactId", artifactId);
+      params.set("api-version", "7.1-preview.1");
+
+      const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/policy/evaluations?${params.toString()}`;
+      const json = await adoFetchJson<unknown>(url);
+      const arr: unknown = Array.isArray(json)
+        ? json
+        : (json as any)?.value && Array.isArray((json as any).value)
+        ? (json as any).value
+        : undefined;
+      if (!Array.isArray(arr)) throw new Error("Invalid PolicyEvaluations response shape");
+      return (arr as unknown[]).map((it) => ZPolicyEvaluation.parse(it));
     });
   }
 }
