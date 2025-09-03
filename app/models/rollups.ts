@@ -16,6 +16,7 @@ export type Person = Readonly<{
 export type PersonRollup = Readonly<{
   person: Person;
   team?: string;
+  notes?: ReadonlyArray<string>;
   workItems?: Readonly<{
     count: number;
     completedTotal: number;
@@ -89,13 +90,22 @@ export function computePersonRollups(
       input.teamByEmail?.[p.email] ||
       undefined;
 
+    const hasWi = wiAgg && wiAgg.count >= threshold;
+    const hasAuthored = authored.count >= threshold;
+    const hasReviewed = reviewed.count >= threshold;
+    const notes: string[] = [];
+    if (!hasWi) notes.push("Work item metrics suppressed (n < nThreshold)");
+    if (!hasAuthored) notes.push("Authored PR metrics suppressed (n < nThreshold)");
+    if (!hasReviewed) notes.push("Review participation metrics suppressed (n < nThreshold)");
+
     const entry: PersonRollup = {
       person: p,
       team,
       // Omit sections that do not meet threshold instead of zeroing/nulling them
-      ...(wiAgg && wiAgg.count >= threshold ? { workItems: wiAgg } : {}),
-      ...(authored.count >= threshold ? { prAuthored: authored } : {}),
-      ...(reviewed.count >= threshold ? { prReviewed: reviewed } : {}),
+      ...(hasWi ? { workItems: wiAgg } : {}),
+      ...(hasAuthored ? { prAuthored: authored } : {}),
+      ...(hasReviewed ? { prReviewed: reviewed } : {}),
+      ...(notes.length ? { notes } : {}),
     } as PersonRollup;
     items.push(entry);
   }
