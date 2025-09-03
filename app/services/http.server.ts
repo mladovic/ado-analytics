@@ -54,41 +54,80 @@ export async function adoFetchJson<T = unknown>(
     ? AbortSignal.any([userSignal, controller.signal])
     : controller.signal;
 
-  let timedOut = false;
-  const timeoutId = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, APP_REQUEST_TIMEOUT_MS);
+  const maxAttempts = 4; // 1 attempt + 3 retries
+  const baseDelayMs = 300;
+  let lastBodySnippet: string | undefined;
 
-  try {
-    const res = await fetch(url, { ...init, method, headers, signal });
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, APP_REQUEST_TIMEOUT_MS);
 
-    if (!res.ok) {
-      let snippet: string | undefined;
+    try {
+      const res = await fetch(url, { ...init, method, headers, signal });
+
+      if (res.ok) {
+        clearTimeout(timeoutId);
+        // Expect JSON
+        return (await res.json()) as T;
+      }
+
+      // Capture snippet for potential final error
       try {
         const text = await res.text();
-        snippet = text.length > 2048 ? `${text.slice(0, 2048)}…` : text;
+        lastBodySnippet = text.length > 512 ? text.slice(0, 512) : text;
       } catch {
         // ignore body read errors
       }
-      throw new AdoHttpError({ status: res.status, url, method, bodySnippet: snippet });
-    }
 
-    // Expect JSON
-    // If response body is empty, this will throw; callers should ensure JSON endpoints.
-    return (await res.json()) as T;
-  } catch (err) {
-    // Translate our timeout into a typed error
-    if (
-      timedOut ||
-      (err instanceof Error && err.name === "AbortError" && controller.signal.aborted)
-    ) {
-      const e = new AdoHttpError({ status: 408, url, method });
-      e.name = "AdoTimeoutError";
-      throw e;
+      const status = res.status;
+      const shouldRetry = status === 429 || status >= 500;
+      if (shouldRetry && attempt < maxAttempts) {
+        // Respect Retry-After header if present
+        const ra = res.headers.get("retry-after");
+        let delayMs: number | undefined;
+        if (ra) {
+          const seconds = Number.parseInt(ra, 10);
+          if (!Number.isNaN(seconds)) {
+            delayMs = Math.max(0, seconds * 1000);
+          } else {
+            const dateMs = Date.parse(ra);
+            if (!Number.isNaN(dateMs)) {
+              delayMs = Math.max(0, dateMs - Date.now());
+            }
+          }
+        }
+        if (delayMs === undefined) {
+          const jitter = Math.floor(Math.random() * 101); // 0..100ms
+          delayMs = baseDelayMs * Math.pow(2, attempt) + jitter;
+        }
+
+        clearTimeout(timeoutId); // cleanup current attempt timer before waiting
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue; // next attempt
+      }
+
+      // Not retrying – throw now with last snippet
+      clearTimeout(timeoutId);
+      throw new AdoHttpError({ status, url, method, bodySnippet: lastBodySnippet });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      // Translate our timeout into a typed error (do not retry timeouts)
+      if (
+        timedOut ||
+        (err instanceof Error && err.name === "AbortError" && controller.signal.aborted)
+      ) {
+        const e = new AdoHttpError({ status: 408, url, method });
+        e.name = "AdoTimeoutError";
+        throw e;
+      }
+      // Other errors (network, etc.) – rethrow
+      throw err;
     }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  // Safety net – should never reach here
+  throw new AdoHttpError({ status: 500, url, method, bodySnippet: lastBodySnippet });
 }
