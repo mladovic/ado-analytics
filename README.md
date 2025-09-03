@@ -1,87 +1,147 @@
-# Welcome to React Router!
+# ADO Analytics
 
-A modern, production-ready template for building full-stack React applications using React Router.
+Full‑stack React app using React Router v7 (framework mode) with SSR, Vite, strict TypeScript, Tailwind CSS v4, and a type‑safe server environment loader (Zod). Includes light/dark theme support with persistent cookie sessions.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+## Tech Stack
 
-## Features
+- React 19 + React Router v7 (framework mode, SSR enabled)
+- Vite 6 for build/dev server with HMR
+- TypeScript (strict) with `~/` path alias to `app/`
+- Tailwind CSS v4 + `cn()` utility via `clsx` and `tailwind-merge`
+- Theme management via `remix-themes` + cookie session
+- Zod‑validated server env loader with `.env` support
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+## Project Structure
 
-## Getting Started
+```
+app/
+  root.tsx                 # Root document, ThemeProvider, loader
+  routes.ts                # Route configuration (indexes, actions)
+  routes/
+    home.tsx               # Index route component
+    action.set-theme.ts    # Action to persist theme
+  components/
+    common/ModeToggle.tsx  # Theme toggle UI
+    ui/button.tsx          # Reusable UI example (CVA-ready)
+  lib/
+    theme.server.ts        # Cookie session + theme resolver
+  env.server.ts            # Zod schema + getServerEnv()
+  load-dotenv.ts           # Loads & expands .env early on server
+public/
+  favicon.ico
+react-router.config.ts     # SSR and framework settings
+vite.config.ts             # Vite configuration
+tsconfig.json              # Paths and strict TS settings
+```
 
-### Installation
+## Scripts
 
-Install the dependencies:
+- `npm run dev`: Start dev server with HMR
+- `npm run build`: Build client and server bundles
+- `npm run start`: Serve the built SSR bundle (`build/server/index.js`)
+- `npm run typecheck`: Generate route types and run TypeScript
+
+## Quick Start
+
+1) Install dependencies
 
 ```bash
 npm install
 ```
 
-### Development
+2) Configure environment
 
-Start the development server with HMR:
+- Copy `.env.example` to `.env` and fill required values (see Environment).
+
+3) Run in development
 
 ```bash
 npm run dev
 ```
 
-Your application will be available at `http://localhost:5173`.
+Open http://localhost:5173
 
-## Building for Production
-
-Create a production build:
+4) Production build and run
 
 ```bash
 npm run build
+npm run start
 ```
 
-## Deployment
+## Environment
 
-### Docker Deployment
+Environment variables are validated on the server at request time. The root loader calls `getServerEnv()`, which throws with a clear error if configuration is missing or invalid.
 
-To build and run using Docker:
+Required (server‑only)
+
+- `ADO_ORG`: Azure DevOps organization (string)
+- `ADO_PROJECT`: Azure DevOps project (string)
+- `ADO_REPO_ID`: Azure DevOps repo id (string)
+- `ADO_PAT`: Azure DevOps Personal Access Token (secret)
+- `SESSION_SECRET`: Long random string for app/session features that require a server secret
+
+Defaults (server‑only)
+
+- `NODE_ENV`: `development` | `test` | `production` (default: `development`)
+- `PORT`: Positive integer (default: `5173`)
+- `APP_MAX_CONCURRENCY`: 1…32 (default: `6`)
+- `APP_REQUEST_TIMEOUT_MS`: Positive integer (default: `60000`)
+- `APP_CACHE_TTL_MS`: Positive integer (default: `86400000`)
+
+Optional
+
+- `THEME_SESSION_SECRET`: Cookie signing secret for theme preference. If unset, a development fallback is used. Set a strong value in production.
+
+How validation works
+
+- `app/load-dotenv.ts` loads `.env` early and supports variable expansion.
+- `app/env.server.ts` defines a Zod schema and exposes `getServerEnv()`.
+- `app/root.tsx` calls `getServerEnv()` in its server loader to fail fast.
+
+Manual check
+
+- Copy `.env.example` → `.env`, set values, and run `npm run dev`.
+- Break a value (e.g., remove `ADO_ORG`) and refresh the app to see a readable validation error in the terminal.
+- Generate a strong secret quickly:
 
 ```bash
-docker build -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-The containerized application can be deployed to any platform that supports Docker, including:
+## Theming
 
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
-
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
-
-```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
-```
+- The app uses `remix-themes` with a cookie session to persist theme.
+- Root layout renders `ThemeProvider` and `<PreventFlashOnWrongTheme />`.
+- Toggle via `ModeToggle` component; server action at `routes/action.set-theme.ts`.
 
 ## Styling
 
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
+- Tailwind CSS v4 is configured; use utility classes directly.
+- Use `cn()` from `app/lib/utils.ts` to compose classes; components are CVA‑friendly.
+
+## TypeScript & Routing
+
+- Strict TypeScript is enabled; route types are generated by `react-router typegen`.
+- Routes are declared in `app/routes.ts` and implemented in `app/routes/*`.
+- SSR is enabled by default (`react-router.config.ts` → `ssr: true`).
+
+## Docker
+
+Build and run the production image:
+
+```bash
+docker build -t ado-analytics .
+docker run --rm -p 3000:3000 --env-file ./.env ado-analytics
+```
+
+Set `PORT` if you want a custom port. Provide required env via `--env-file` or platform secrets.
+
+## Troubleshooting
+
+- Validation error on boot: check `.env` values; compare with `.env.example`.
+- Theme cookie not persisting: set a strong `THEME_SESSION_SECRET` in production; ensure cookies are not blocked.
+- Type errors: run `npm run typecheck` to regenerate route types and compile TS.
 
 ---
 
-Built with ❤️ using React Router.
+Built with React Router v7 and Vite.
