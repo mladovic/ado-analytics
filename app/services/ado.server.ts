@@ -8,8 +8,9 @@ import {
   PullRequestSchema as ZPullRequest,
   PRThreadSchema as ZPRThread,
   PRReviewerSchema as ZPRReviewer,
+  PRIterationSchema as ZPRIteration,
 } from "~/models/zod-ado";
-import type { WorkItem, WorkItemUpdate, PullRequest, PRThread, PRReviewer } from "~/models/zod-ado";
+import type { WorkItem, WorkItemUpdate, PullRequest, PRThread, PRReviewer, PRIteration } from "~/models/zod-ado";
 
 // Small stable hash (FNV-1a 32-bit) for cache keys
 function hashString(input: string): string {
@@ -242,6 +243,53 @@ export class AdoClient {
         : undefined;
       if (!Array.isArray(arr)) throw new Error("Invalid PRReviewers response shape");
       return (arr as unknown[]).map((it) => ZPRReviewer.parse(it));
+    });
+  }
+
+  async listPRIterations(prId: number): Promise<PRIteration[]> {
+    const cacheKey = `iterations:${prId}`;
+    return getOrSet<PRIteration[]>(cacheKey, this.ttlMs, async () => {
+      const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
+        this.repoId
+      )}/pullRequests/${encodeURIComponent(String(prId))}/iterations?api-version=7.1`;
+
+      const json = await adoFetchJson<unknown>(url);
+      const arr: unknown = Array.isArray(json)
+        ? json
+        : (json as any)?.value && Array.isArray((json as any).value)
+        ? (json as any).value
+        : undefined;
+      if (!Array.isArray(arr)) throw new Error("Invalid PRIterations response shape");
+      return (arr as unknown[]).map((it) => ZPRIteration.parse(it));
+    });
+  }
+
+  async listPRWorkItems(prId: number): Promise<number[]> {
+    const cacheKey = `prLinks:${prId}`;
+    return getOrSet<number[]>(cacheKey, this.ttlMs, async () => {
+      const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
+        this.repoId
+      )}/pullRequests/${encodeURIComponent(String(prId))}/workitems?api-version=7.1`;
+
+      const json = await adoFetchJson<unknown>(url);
+      const arr: unknown = Array.isArray(json)
+        ? json
+        : (json as any)?.value && Array.isArray((json as any).value)
+        ? (json as any).value
+        : undefined;
+      if (!Array.isArray(arr)) throw new Error("Invalid PRWorkItems response shape");
+
+      const ids = (arr as unknown[])
+        .map((it) =>
+          typeof it === "number"
+            ? it
+            : it && typeof (it as any).id === "number"
+            ? (it as any).id
+            : undefined
+        )
+        .filter((n): n is number => typeof n === "number");
+
+      return ids;
     });
   }
 }
