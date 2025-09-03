@@ -1,4 +1,4 @@
-import { getServerEnv } from "~/env.server";
+import { getServerEnv } from "../env.server";
 
 /**
  * Build a stable hash for cache keys (FNV-1a 32-bit).
