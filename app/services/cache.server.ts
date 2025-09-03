@@ -4,11 +4,11 @@
 
 type Entry<T> = {
   value?: T
-  promise?: Promise<T>
   expiresAt: number
 }
 
 const store: Map<string, Entry<unknown>> = new Map()
+const inFlight: Map<string, Promise<unknown>> = new Map()
 
 let maxEntries = 500
 
@@ -60,12 +60,6 @@ export async function getOrSet<T>(
   const existing = store.get(key) as Entry<T> | undefined
 
   if (existing) {
-    // If there is an in-flight load, return it regardless of expiry
-    if (existing.promise) {
-      touch(key, existing as Entry<unknown>)
-      return existing.promise
-    }
-
     // If we have a fresh value, return it
     if (existing.value !== undefined && existing.expiresAt > now) {
       touch(key, existing as Entry<unknown>)
@@ -76,30 +70,31 @@ export async function getOrSet<T>(
     store.delete(key)
   }
 
-  // Start a new load and cache the in-flight promise to dedupe concurrent callers
+  // If another request is already loading this key, return its promise
+  const pending = inFlight.get(key) as Promise<T> | undefined
+  if (pending) {
+    return pending
+  }
+
+  // Start a new load and register it in the in-flight map to dedupe callers
   const p = loader()
-  const entry: Entry<T> = { promise: p, expiresAt: 0 }
-  store.set(key, entry as Entry<unknown>)
-  touch(key, entry as Entry<unknown>)
-  trim()
+  inFlight.set(key, p as Promise<unknown>)
 
   try {
     const value = await p
-    const current = store.get(key) as Entry<T> | undefined
-    if (current && current.promise === p) {
-      current.value = value
-      current.promise = undefined
-      current.expiresAt = Date.now() + Math.max(0, Math.floor(ttlMs))
-      touch(key, current as Entry<unknown>)
-      trim()
+    inFlight.delete(key)
+
+    const entry: Entry<T> = {
+      value,
+      expiresAt: Date.now() + Math.max(0, Math.floor(ttlMs)),
     }
+    store.set(key, entry as Entry<unknown>)
+    touch(key, entry as Entry<unknown>)
+    trim()
     return value
   } catch (err) {
     // On failure, remove the entry if it still references this promise
-    const current = store.get(key) as Entry<T> | undefined
-    if (current && current.promise === p) {
-      store.delete(key)
-    }
+    inFlight.delete(key)
     throw err
   }
 }
