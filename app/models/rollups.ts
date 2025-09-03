@@ -55,6 +55,8 @@ export function computePersonRollups(
     nThreshold: number;
     workingHours: Schedule;
     teamByEmail?: Record<string, string | undefined>;
+    admins?: ReadonlyArray<string> | ReadonlySet<string>;
+    managers?: ReadonlyArray<string> | ReadonlySet<string>;
   }>
 ): PeopleRollupResponse {
   const items: PersonRollup[] = [];
@@ -95,21 +97,34 @@ export function computePersonRollups(
     const hasReviewed = reviewed.count >= threshold;
     const notes: string[] = [];
     if (!hasWi) notes.push("Work item metrics suppressed (n < nThreshold)");
-    if (!hasAuthored) notes.push("Authored PR metrics suppressed (n < nThreshold)");
-    if (!hasReviewed) notes.push("Review participation metrics suppressed (n < nThreshold)");
+    if (!hasAuthored)
+      notes.push("Authored PR metrics suppressed (n < nThreshold)");
+    if (!hasReviewed)
+      notes.push("Review participation metrics suppressed (n < nThreshold)");
 
     // Directional notes for small samples within [nThreshold, nThreshold+2]
     const dirUpper = threshold + 2;
-    if (hasWi && wiAgg && wiAgg.count <= dirUpper) notes.push(`Directional (n=${wiAgg.count})`);
-    if (hasAuthored && authored.count <= dirUpper) notes.push(`Directional (n=${authored.count})`);
-    if (hasReviewed && reviewed.count <= dirUpper) notes.push(`Directional (n=${reviewed.count})`);
+    if (hasWi && wiAgg && wiAgg.count <= dirUpper)
+      notes.push(`Directional (n=${wiAgg.count})`);
+    if (hasAuthored && authored.count <= dirUpper)
+      notes.push(`Directional (n=${authored.count})`);
+    if (hasReviewed && reviewed.count <= dirUpper)
+      notes.push(`Directional (n=${reviewed.count})`);
+
+    // Manager/Admin emphasis note
+    const isAdmin = inGroup(input.admins, p.email, p.id);
+    const isManager = inGroup(input.managers, p.email, p.id);
+    if (isAdmin || isManager) {
+      notes.push("Manager metrics emphasized: reviews/responsiveness.");
+    }
 
     const entry: PersonRollup = {
       person: p,
       team,
       // Omit sections that do not meet threshold instead of zeroing/nulling them
       ...(hasWi ? { workItems: wiAgg } : {}),
-      ...(hasAuthored ? { prAuthored: authored } : {}),
+      // Option A (MVP): Keep authored metrics present, append note if suppressed
+      prAuthored: authored,
       ...(hasReviewed ? { prReviewed: reviewed } : {}),
       ...(notes.length ? { notes } : {}),
     } as PersonRollup;
@@ -197,4 +212,25 @@ function aggregateWorkItems(
     timeInStateMs: { toDo: toDoMs, inProgress: inProgressMs, done: doneMs },
     reworkCountTotal,
   };
+}
+
+function inGroup(
+  group: ReadonlyArray<string> | ReadonlySet<string> | undefined,
+  email?: string,
+  id?: string
+) {
+  if (!group) return false;
+  const keyEmail = (email || "").trim().toLowerCase();
+  const keyId = (id || "").trim().toLowerCase();
+  if (Array.isArray(group)) {
+    const set = new Set(
+      group.map((s) => (typeof s === "string" ? s.trim().toLowerCase() : ""))
+    );
+    return (keyEmail && set.has(keyEmail)) || (keyId && set.has(keyId));
+  }
+  // ReadonlySet
+  return (
+    (keyEmail && (group as ReadonlySet<string>).has(keyEmail)) ||
+    (keyId && (group as ReadonlySet<string>).has(keyId))
+  );
 }
