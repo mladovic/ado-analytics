@@ -17,7 +17,19 @@ export function hashString(input: string): string {
 /**
  * Structured HTTP error for Azure DevOps calls.
  */
-export class AdoHttpError extends Error {
+export interface AdoHttpError {
+  status: number;
+  url: string;
+  method: string;
+  attempt: number;
+  bodySnippet?: string;
+}
+
+/**
+ * Concrete HTTP error with diagnostics for Azure DevOps calls.
+ * Implements AdoHttpError interface.
+ */
+export class HttpError extends Error implements AdoHttpError {
   readonly status: number;
   readonly url: string;
   readonly method: string;
@@ -30,9 +42,10 @@ export class AdoHttpError extends Error {
     method: string;
     attempt: number;
     bodySnippet?: string;
+    name?: string;
   }) {
     super(`${options.method} ${options.url} -> ${options.status} (attempt ${options.attempt})`);
-    this.name = "AdoHttpError";
+    this.name = options.name ?? "AdoHttpError";
     this.status = options.status;
     this.url = options.url;
     this.method = options.method;
@@ -40,18 +53,6 @@ export class AdoHttpError extends Error {
     this.bodySnippet = options.bodySnippet;
   }
 }
-
-/**
- * Specialized timeout error for ADO requests.
- */
-export class AdoTimeoutError extends AdoHttpError {
-  constructor(args: ConstructorParameters<typeof AdoHttpError>[0]) {
-    super(args);
-    this.name = "AdoTimeoutError";
-  }
-}
-
-export type { AdoHttpError as AdoHttpErrorType };
 
 // Minimal internal semaphore (p-limit style) to cap concurrency
 type LimitFn = <T>(fn: () => Promise<T>) => Promise<T>;
@@ -104,6 +105,7 @@ function buildAdoHeaders(initHeaders?: HeadersInit): Headers {
     headers.set("authorization", `Basic ${token}`);
   }
   if (!headers.has("accept")) headers.set("accept", "application/json");
+  if (!headers.has("user-agent")) headers.set("user-agent", "ADO-Analytics/1.0 (+server)");
   return headers;
 }
 
@@ -180,20 +182,20 @@ export async function adoFetchJson<T = unknown>(
         }
 
         clearTimeout(timeoutId);
-        throw new AdoHttpError({ status, url, method, attempt, bodySnippet: lastBodySnippet });
+        throw new HttpError({ status, url, method, attempt, bodySnippet: lastBodySnippet });
       } catch (err) {
         clearTimeout(timeoutId);
         const aborted = controller.signal.aborted || (err instanceof Error && err.name === "AbortError");
         if (timedOut || aborted) {
-          throw new AdoTimeoutError({ status: 408, url, method, attempt, bodySnippet: lastBodySnippet });
+          throw new HttpError({ status: 408, url, method, attempt, bodySnippet: lastBodySnippet, name: "AdoTimeoutError" });
         }
         // Wrap other errors to normalize shape
         const snippet = err instanceof Error ? String(err.message ?? err) : String(err);
-        throw new AdoHttpError({ status: 500, url, method, attempt, bodySnippet: snippet });
+        throw new HttpError({ status: 500, url, method, attempt, bodySnippet: snippet });
       }
     }
 
     // Safety net – should never reach here
-    throw new AdoHttpError({ status: 500, url, method, attempt: DEFAULT_MAX_ATTEMPTS, bodySnippet: lastBodySnippet });
+    throw new HttpError({ status: 500, url, method, attempt: DEFAULT_MAX_ATTEMPTS, bodySnippet: lastBodySnippet });
   });
 }

@@ -75,7 +75,7 @@ describe("adoFetchJson retry/backoff and timeout", () => {
     );
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const { adoFetchJson, AdoHttpError } = await import("./http.server");
+    const { adoFetchJson, HttpError } = await import("./http.server");
 
     const url = "https://example.com/always-500";
     const p = adoFetchJson(url);
@@ -97,8 +97,8 @@ describe("adoFetchJson retry/backoff and timeout", () => {
     const caught: unknown = await errP;
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(caught).toBeInstanceOf(AdoHttpError);
-    const err = caught as InstanceType<typeof AdoHttpError> & {
+    expect(caught).toBeInstanceOf(HttpError);
+    const err = caught as InstanceType<typeof HttpError> & {
       status: number;
       url: string;
       method: string;
@@ -133,7 +133,7 @@ describe("adoFetchJson retry/backoff and timeout", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const { adoFetchJson, AdoTimeoutError } = await import("./http.server");
+    const { adoFetchJson, HttpError } = await import("./http.server");
 
     const url = "https://example.com/slow";
     const p = adoFetchJson(url);
@@ -144,7 +144,8 @@ describe("adoFetchJson retry/backoff and timeout", () => {
     await vi.advanceTimersByTimeAsync(5);
 
     const caught: any = await errP;
-    expect(caught).toBeInstanceOf(AdoTimeoutError);
+    expect(caught).toBeInstanceOf(HttpError);
+    expect(caught.name).toBe("AdoTimeoutError");
     expect(caught.status).toBe(408);
     expect(caught.url).toBe(url);
     expect(caught.method).toBe("GET");
