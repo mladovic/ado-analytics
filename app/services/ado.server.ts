@@ -1,7 +1,8 @@
 import { getServerEnv } from "~/env.server";
 import { adoFetchJson } from "~/services/http.server";
 import { getOrSet } from "~/services/cache.server";
-import { WiqlResponseSchema as ZWiqlResponse } from "~/models/zod-ado";
+import { WiqlResponseSchema as ZWiqlResponse, WorkItemSchema as ZWorkItem } from "~/models/zod-ado";
+import type { WorkItem } from "~/models/zod-ado";
 
 // Small stable hash (FNV-1a 32-bit) for cache keys
 function hashString(input: string): string {
@@ -46,5 +47,55 @@ export class AdoClient {
       return ids;
     });
   }
-}
 
+  async getWorkItemsBatch(ids: number[], fields?: string[]): Promise<WorkItem[]> {
+    if (!ids.length) return [];
+
+    const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/workitemsbatch?api-version=7.1`;
+
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += 200) {
+      chunks.push(ids.slice(i, i + 200));
+    }
+
+    const results = await Promise.all(
+      chunks.map(async (chunk) => {
+        const hashInput = JSON.stringify([chunk, fields ?? []]);
+        const cacheKey = `workitemsBatch:${hashString(hashInput)}`;
+        return getOrSet<WorkItem[]>(cacheKey, this.ttlMs, async () => {
+          const payload: Record<string, unknown> = { ids: chunk };
+          if (fields && fields.length) payload.fields = fields;
+          const json = await adoFetchJson<unknown>(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const arr: unknown = Array.isArray(json)
+            ? json
+            : (json as any)?.value && Array.isArray((json as any).value)
+            ? (json as any).value
+            : undefined;
+
+          if (!Array.isArray(arr)) {
+            throw new Error("Invalid WorkItemsBatch response shape");
+          }
+
+          // Validate each item
+          const items = (arr as unknown[]).map((it) => ZWorkItem.parse(it)) as WorkItem[];
+          return items;
+        });
+      })
+    );
+
+    const all = results.flat();
+    // Order by the input ids order
+    const indexById = new Map<number, number>();
+    ids.forEach((id, i) => indexById.set(id, i));
+    const ordered = all
+      .filter((w) => indexById.has(w.id))
+      .sort((a, b) => (indexById.get(a.id)! - indexById.get(b.id)!));
+
+    return ordered;
+  }
+}
