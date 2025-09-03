@@ -1,6 +1,6 @@
-import { getServerEnv } from "~/env.server";
-import { adoFetchJson, hashString } from "~/services/http.server";
-import { getOrSet } from "~/services/cache.server";
+import { getServerEnv } from "../env.server";
+import { adoFetchJson, hashString } from "./http.server";
+import { getOrSet } from "./cache.server";
 import {
   WiqlResponseSchema as ZWiqlResponse,
   WorkItemSchema as ZWorkItem,
@@ -12,7 +12,7 @@ import {
   PolicyEvaluationSchema as ZPolicyEvaluation,
   GraphUserSchema as ZGraphUser,
   AreaNodeSchema as ZAreaNode,
-} from "~/models/zod-ado";
+} from "../models/zod-ado";
 import type {
   WorkItem,
   WorkItemUpdate,
@@ -22,7 +22,7 @@ import type {
   PRIteration,
   PolicyEvaluation,
   AreaNode,
-} from "~/models/zod-ado";
+} from "../models/zod-ado";
 
 // Centralized API versions
 const API = {
