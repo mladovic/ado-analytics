@@ -1,5 +1,5 @@
 import { getServerEnv } from "~/env.server";
-import { adoFetchJson } from "~/services/http.server";
+import { adoFetchJson, hashString } from "~/services/http.server";
 import { getOrSet } from "~/services/cache.server";
 import {
   WiqlResponseSchema as ZWiqlResponse,
@@ -21,23 +21,26 @@ import type {
   PolicyEvaluation,
 } from "~/models/zod-ado";
 
-// Small stable hash (FNV-1a 32-bit) for cache keys
-function hashString(input: string): string {
-  let h = 0x811c9dc5; // FNV offset basis
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    // h *= 16777619 (with overflow in 32-bit)
-    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-  }
-  return ("00000000" + h.toString(16)).slice(-8);
+// Centralized API versions
+const API = {
+  wit: "7.1",
+  git: "7.1",
+  policyPreview: "7.1-preview.1",
+} as const;
+
+// Normalize Azure DevOps list responses which often use { value: [] }
+function asArray(json: unknown): unknown[] {
+  if (Array.isArray(json)) return json;
+  const value = (json as any)?.value;
+  return Array.isArray(value) ? value : [];
 }
 
 export class AdoClient {
-  private org: string;
-  private project: string;
-  private repoId: string;
-  private ttlMs: number;
-  private baseUrl: string;
+  private readonly org: string;
+  private readonly project: string;
+  private readonly repoId: string;
+  private readonly ttlMs: number;
+  private readonly baseUrl: string;
 
   constructor() {
     const { ADO_ORG, ADO_PROJECT, ADO_REPO_ID, APP_CACHE_TTL_MS } = getServerEnv();
@@ -48,10 +51,11 @@ export class AdoClient {
     this.baseUrl = `https://dev.azure.com/${this.org}`;
   }
 
+  /** Query work item IDs by WIQL string. */
   async queryByWiql(wiql: string): Promise<number[]> {
     const cacheKey = `wiql:${hashString(wiql)}`;
     return getOrSet<number[]>(cacheKey, this.ttlMs, async () => {
-      const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/wiql?api-version=7.1`;
+      const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/wiql?api-version=${API.wit}`;
       const body = JSON.stringify({ query: wiql });
       const json = await adoFetchJson<unknown>(url, {
         method: "POST",
@@ -70,7 +74,7 @@ export class AdoClient {
   async getWorkItemsBatch(ids: number[], fields?: string[]): Promise<WorkItem[]> {
     if (!ids.length) return [];
 
-    const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/workitemsbatch?api-version=7.1`;
+    const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/workitemsbatch?api-version=${API.wit}`;
 
     const chunks: number[][] = [];
     for (let i = 0; i < ids.length; i += 200) {
@@ -89,17 +93,8 @@ export class AdoClient {
             headers: { "content-type": "application/json" },
             body: JSON.stringify(payload),
           });
-
-          const arr: unknown = Array.isArray(json)
-            ? json
-            : (json as any)?.value && Array.isArray((json as any).value)
-            ? (json as any).value
-            : undefined;
-
-          if (!Array.isArray(arr)) {
-            throw new Error("Invalid WorkItemsBatch response shape");
-          }
-
+          const arr = asArray(json);
+          if (!Array.isArray(arr)) throw new Error("Invalid WorkItemsBatch response shape");
           // Validate each item
           const items = (arr as unknown[]).map((it) => ZWorkItem.parse(it)) as WorkItem[];
           return items;
@@ -126,23 +121,14 @@ export class AdoClient {
       let safety = 0;
 
       do {
-        let url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/workitems/${id}/updates?api-version=7.1`;
+        let url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/wit/workitems/${id}/updates?api-version=${API.wit}`;
         if (continuationToken) {
           url += `&continuationToken=${encodeURIComponent(continuationToken)}`;
         }
 
         const json = await adoFetchJson<unknown>(url);
-
-        const pageArr: unknown = Array.isArray(json)
-          ? json
-          : (json as any)?.value && Array.isArray((json as any).value)
-          ? (json as any).value
-          : undefined;
-
-        if (!Array.isArray(pageArr)) {
-          throw new Error("Invalid WorkItemUpdates response shape");
-        }
-
+        const pageArr = asArray(json);
+        if (!Array.isArray(pageArr)) throw new Error("Invalid WorkItemUpdates response shape");
         for (const it of pageArr as unknown[]) {
           all.push(ZWorkItemUpdate.parse(it));
         }
@@ -187,18 +173,14 @@ export class AdoClient {
         searchParams.set("searchCriteria.createdBefore", params.to)
         searchParams.set("searchCriteria.targetRefName", targetRef)
         if (params.status) searchParams.set("searchCriteria.status", params.status)
-        searchParams.set("api-version", "7.1")
+        searchParams.set("api-version", API.git)
 
         const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
           this.repoId
         )}/pullrequests?${searchParams.toString()}`
 
         const json = await adoFetchJson<unknown>(url)
-        const arr: unknown = Array.isArray(json)
-          ? json
-          : (json as any)?.value && Array.isArray((json as any).value)
-          ? (json as any).value
-          : undefined
+        const arr = asArray(json)
         if (!Array.isArray(arr)) throw new Error("Invalid PullRequests response shape")
         return (arr as unknown[]).map((it) => ZPullRequest.parse(it))
       })
@@ -224,14 +206,10 @@ export class AdoClient {
     return getOrSet<PRThread[]>(cacheKey, this.ttlMs, async () => {
       const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
         this.repoId
-      )}/pullRequests/${encodeURIComponent(String(prId))}/threads?api-version=7.1`;
+      )}/pullRequests/${encodeURIComponent(String(prId))}/threads?api-version=${API.git}`;
 
       const json = await adoFetchJson<unknown>(url);
-      const arr: unknown = Array.isArray(json)
-        ? json
-        : (json as any)?.value && Array.isArray((json as any).value)
-        ? (json as any).value
-        : undefined;
+      const arr = asArray(json);
       if (!Array.isArray(arr)) throw new Error("Invalid PRThreads response shape");
       return (arr as unknown[]).map((it) => ZPRThread.parse(it));
     });
@@ -242,14 +220,10 @@ export class AdoClient {
     return getOrSet<PRReviewer[]>(cacheKey, this.ttlMs, async () => {
       const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
         this.repoId
-      )}/pullRequests/${encodeURIComponent(String(prId))}/reviewers?api-version=7.1`;
+      )}/pullRequests/${encodeURIComponent(String(prId))}/reviewers?api-version=${API.git}`;
 
       const json = await adoFetchJson<unknown>(url);
-      const arr: unknown = Array.isArray(json)
-        ? json
-        : (json as any)?.value && Array.isArray((json as any).value)
-        ? (json as any).value
-        : undefined;
+      const arr = asArray(json);
       if (!Array.isArray(arr)) throw new Error("Invalid PRReviewers response shape");
       return (arr as unknown[]).map((it) => ZPRReviewer.parse(it));
     });
@@ -260,14 +234,10 @@ export class AdoClient {
     return getOrSet<PRIteration[]>(cacheKey, this.ttlMs, async () => {
       const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
         this.repoId
-      )}/pullRequests/${encodeURIComponent(String(prId))}/iterations?api-version=7.1`;
+      )}/pullRequests/${encodeURIComponent(String(prId))}/iterations?api-version=${API.git}`;
 
       const json = await adoFetchJson<unknown>(url);
-      const arr: unknown = Array.isArray(json)
-        ? json
-        : (json as any)?.value && Array.isArray((json as any).value)
-        ? (json as any).value
-        : undefined;
+      const arr = asArray(json);
       if (!Array.isArray(arr)) throw new Error("Invalid PRIterations response shape");
       return (arr as unknown[]).map((it) => ZPRIteration.parse(it));
     });
@@ -278,14 +248,10 @@ export class AdoClient {
     return getOrSet<number[]>(cacheKey, this.ttlMs, async () => {
       const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
         this.repoId
-      )}/pullRequests/${encodeURIComponent(String(prId))}/workitems?api-version=7.1`;
+      )}/pullRequests/${encodeURIComponent(String(prId))}/workitems?api-version=${API.git}`;
 
       const json = await adoFetchJson<unknown>(url);
-      const arr: unknown = Array.isArray(json)
-        ? json
-        : (json as any)?.value && Array.isArray((json as any).value)
-        ? (json as any).value
-        : undefined;
+      const arr = asArray(json);
       if (!Array.isArray(arr)) throw new Error("Invalid PRWorkItems response shape");
 
       const ids = (arr as unknown[])
@@ -308,15 +274,11 @@ export class AdoClient {
       const artifactId = `vstfs:///CodeReview/CodeReviewId/${projectId}/${prId}`;
       const params = new URLSearchParams();
       params.set("artifactId", artifactId);
-      params.set("api-version", "7.1-preview.1");
+      params.set("api-version", API.policyPreview);
 
       const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/policy/evaluations?${params.toString()}`;
       const json = await adoFetchJson<unknown>(url);
-      const arr: unknown = Array.isArray(json)
-        ? json
-        : (json as any)?.value && Array.isArray((json as any).value)
-        ? (json as any).value
-        : undefined;
+      const arr = asArray(json);
       if (!Array.isArray(arr)) throw new Error("Invalid PolicyEvaluations response shape");
       return (arr as unknown[]).map((it) => ZPolicyEvaluation.parse(it));
     });

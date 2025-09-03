@@ -72,7 +72,7 @@ export const WorkItemUpdateSchema = z
     id: z.number().optional(),
     rev: z.number().optional(),
     revisedDate: z.string().optional(),
-    fields: FieldDeltaSchema,
+    fields: z.record(FieldDeltaSchema),
   })
   .catchall(z.unknown());
 export type WorkItemUpdate = z.infer<typeof WorkItemUpdateSchema>;
