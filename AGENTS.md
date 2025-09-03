@@ -2,48 +2,54 @@
 
 ## Project Structure & Module Organization
 
-- app/: Application source code.
-  - app/routes.ts: Route config (indexes, actions).
-  - app/routes/: Route modules (e.g., home.tsx, action.set-theme.ts).
-  - app/components/: Reusable UI (ui/, common/).
-  - app/lib/: Utilities and server-side theme session.
-- public/: Static assets (e.g., favicon).
-- vite.config.ts: Vite + React Router + Tailwind setup.
-- tsconfig.json: Path alias `~/*` → `app/*` and strict TS settings.
+- `app/`: Application source.
+  - `routes.ts`: Route config (indexes, actions).
+  - `routes/`: Route modules (e.g., `home.tsx`, `action.set-theme.ts`).
+  - `components/`: Reusable UI (`ui/`, `common/`).
+  - `lib/`: Utilities (e.g., `theme.server.ts`, `utils.ts`).
+  - `services/`: Server‑side clients/cache/http helpers.
+  - `models/`: Zod models for API types.
+  - `env.server.ts`, `load-dotenv.ts`: Validated server environment.
+- `test/`: Test setup (`setup/msw.ts`) and MSW handlers; unit tests are co‑located as `*.test.ts(x)` under `app/`.
+- `public/`: Static assets.
+- `react-router.config.ts`: Framework/SSR settings; `vite.config.ts`: Vite config; `tsconfig.json`: `~/` → `app/` alias.
 
 ## Build, Test, and Development Commands
 
-- npm run dev (or pnpm dev): Start dev server with HMR.
-- npm run build (or pnpm build): Build client and server bundles.
-- npm run start (or pnpm start): Serve built app from `build/server/index.js`.
-- npm run typecheck: Generate route types and run TypeScript.
+- `npm run dev`: Start dev server with HMR.
+- `npm run build`: Build client and server bundles.
+- `npm run start`: Serve built SSR app from `build/server/index.js`.
+- `npm run typecheck`: Generate route types and run TypeScript.
+- `npm run test` | `test:watch`: Run Vitest (CI | watch).
+- `npm run coverage`: Generate V8 coverage reports.
+- `npm run e2e`: Run Playwright tests.
 
 ## Coding Style & Naming Conventions
 
-- Language: TypeScript (strict). Components as function components.
-- Import paths: Prefer `~/...` alias from `tsconfig.json`.
-- Styling: Tailwind CSS v4 with `cn()` utility and CVA for variants.
-- Files: PascalCase for React components (e.g., ModeToggle.tsx); kebab/dot patterns for routes/actions (e.g., action.set-theme.ts).
-- Formatting/Lint: Follow Prettier-like 2-space indentation; keep files typed and narrow.
+- TypeScript (strict). Use `~/...` imports.
+- Tailwind CSS v4; compose classes with `cn()`; CVA‑friendly UI.
+- Components: PascalCase (e.g., `ModeToggle.tsx`). Routes/actions: kebab/dot (e.g., `action.set-theme.ts`).
+- Formatting: Prettier‑like 2‑space indentation; keep modules focused and typed.
 
 ## Testing Guidelines
 
-- Framework not set up yet. If adding tests, prefer Vitest + React Testing Library for units and Playwright for E2E.
-- Place tests alongside source as `*.test.ts(x)`; keep routes/components isolated and mock loaders/actions as needed.
-- Aim for meaningful coverage on loaders, actions, and critical UI logic.
+- Unit: Vitest (node env), MSW for HTTP mocks (`test/setup/msw.ts`).
+- E2E: Playwright via `npm run e2e`.
+- Location: Co‑locate as `*.test.ts(x)` near source; share handlers under `test/msw/`.
+- Coverage: `npm run coverage` produces `text` and `lcov` reports.
 
 ## Commit & Pull Request Guidelines
 
-- Commits: Imperative, concise subject (<= 72 chars) + details in body when needed (e.g., "Add theme toggle and wire session").
-- PRs: Clear description, linked issues, screenshots for UI changes, and notes on route/loader/action impacts. Reference affected files under `app/`.
-- Keep diffs focused; include small, targeted commits for reviewability.
+- Commits: Imperative, concise subject (<= 72 chars) + body if needed.
+- PRs: Clear description, linked issues, screenshots for UI changes, and notes on route/loader/action impacts; reference affected paths under `app/`.
+- Keep diffs focused; prefer small, reviewable commits.
 
 ## Security & Configuration Tips
 
-- THEME_SESSION_SECRET: Set a strong value in production for theme cookies.
-- Environment: Do not commit secrets. Use deployment-specific env injection.
-- Docker: `Dockerfile` builds prod image; expose via `npm run start`.
+- Environment is validated (`app/env.server.ts`). Required: `ADO_ORG`, `ADO_PROJECT`, `ADO_REPO_ID`, `ADO_PAT`, `SESSION_SECRET`. Optional: `THEME_SESSION_SECRET`.
+- Do not commit secrets; use `.env` locally and deployment‑specific env injection in production.
+- Docker: Use `Dockerfile` to build; run with `--env-file ./.env` and `npm run start`.
 
 ## Architecture Overview
 
-- React Router v7 full‑stack SSR with Vite. Routes declared in `app/routes.ts` and implemented in `app/routes/` with loaders/actions where applicable.
+- React Router v7 full‑stack SSR with Vite. Routes are declared in `app/routes.ts` and implemented in `app/routes/*` with loaders/actions where applicable.
