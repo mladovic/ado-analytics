@@ -57,6 +57,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.1.2
         version: 19.1.9(@types/react@19.1.12)
+      remix-themes:
+        specifier: ^2.0.4
+        version: 2.0.4(react-router@7.8.2(react-dom@19.1.1(react@19.1.1))(react@19.1.1))
       tailwindcss:
         specifier: ^4.1.4
         version: 4.1.12
@@ -1361,6 +1364,11 @@ packages:
   readdirp@4.1.2:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
+
+  remix-themes@2.0.4:
+    resolution: {integrity: sha512-S1vIx86xdsMv+ceaWGWtlVZBMhU4tmZeBOBzOiZnhbHnGBbd5YeyIlZ5EL3BSEhZq35oEcINeTrMrVju9GPYEA==}
+    peerDependencies:
+      react-router: '>=7.0.0'
 
   retry@0.12.0:
     resolution: {integrity: sha512-9LkiTwjUh6rT555DtE9rTX+BKByPfrMzEAtnlEtdEwr3Nkffwiihqe2bWADg+OQRjt9gl6ICdmB/ZFDCGAtSow==}
@@ -2867,6 +2875,10 @@ snapshots:
   react@19.1.1: {}
 
   readdirp@4.1.2: {}
+
+  remix-themes@2.0.4(react-router@7.8.2(react-dom@19.1.1(react@19.1.1))(react@19.1.1)):
+    dependencies:
+      react-router: 7.8.2(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
 
   retry@0.12.0: {}
 
