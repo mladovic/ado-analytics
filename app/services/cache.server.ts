@@ -50,7 +50,12 @@ export async function getOrSet<T>(
   key: string,
   ttlMs: number,
   loader: () => Promise<T>,
+  opts?: { bypass?: boolean },
 ): Promise<T> {
+  // If bypass is requested, skip cache read and write-through entirely
+  if (opts?.bypass) {
+    return loader()
+  }
   const now = Date.now()
   const existing = store.get(key) as Entry<T> | undefined
 
@@ -98,4 +103,3 @@ export async function getOrSet<T>(
     throw err
   }
 }
-
