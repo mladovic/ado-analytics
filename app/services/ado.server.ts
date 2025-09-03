@@ -5,8 +5,9 @@ import {
   WiqlResponseSchema as ZWiqlResponse,
   WorkItemSchema as ZWorkItem,
   WorkItemUpdateSchema as ZWorkItemUpdate,
+  PullRequestSchema as ZPullRequest,
 } from "~/models/zod-ado";
-import type { WorkItem, WorkItemUpdate } from "~/models/zod-ado";
+import type { WorkItem, WorkItemUpdate, PullRequest } from "~/models/zod-ado";
 
 // Small stable hash (FNV-1a 32-bit) for cache keys
 function hashString(input: string): string {
@@ -22,13 +23,15 @@ function hashString(input: string): string {
 export class AdoClient {
   private org: string;
   private project: string;
+  private repoId: string;
   private ttlMs: number;
   private baseUrl: string;
 
   constructor() {
-    const { ADO_ORG, ADO_PROJECT, APP_CACHE_TTL_MS } = getServerEnv();
+    const { ADO_ORG, ADO_PROJECT, ADO_REPO_ID, APP_CACHE_TTL_MS } = getServerEnv();
     this.org = ADO_ORG;
     this.project = ADO_PROJECT;
+    this.repoId = ADO_REPO_ID;
     this.ttlMs = APP_CACHE_TTL_MS;
     this.baseUrl = `https://dev.azure.com/${this.org}`;
   }
@@ -149,5 +152,58 @@ export class AdoClient {
 
       return all;
     });
+  }
+
+  async listPullRequests(params: {
+    from: string
+    to: string
+    status?: "active" | "completed"
+    targetRefs?: string[]
+  }): Promise<PullRequest[]> {
+    const targets = (params.targetRefs && params.targetRefs.length
+      ? params.targetRefs
+      : ["refs/heads/main"]) as string[]
+
+    const cacheKey = `prs:${hashString(
+      JSON.stringify({ from: params.from, to: params.to, status: params.status ?? "", targetRefs: targets })
+    )}`
+
+    return getOrSet<PullRequest[]>(cacheKey, this.ttlMs, async () => {
+      const queries = targets.map(async (targetRef) => {
+        const searchParams = new URLSearchParams()
+        searchParams.set("searchCriteria.createdAfter", params.from)
+        searchParams.set("searchCriteria.createdBefore", params.to)
+        searchParams.set("searchCriteria.targetRefName", targetRef)
+        if (params.status) searchParams.set("searchCriteria.status", params.status)
+        searchParams.set("api-version", "7.1")
+
+        const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
+          this.repoId
+        )}/pullrequests?${searchParams.toString()}`
+
+        const json = await adoFetchJson<unknown>(url)
+        const arr: unknown = Array.isArray(json)
+          ? json
+          : (json as any)?.value && Array.isArray((json as any).value)
+          ? (json as any).value
+          : undefined
+        if (!Array.isArray(arr)) throw new Error("Invalid PullRequests response shape")
+        return (arr as unknown[]).map((it) => ZPullRequest.parse(it))
+      })
+
+      const batches = await Promise.all(queries)
+      const merged = ([] as PullRequest[]).concat(...batches)
+
+      // Deduplicate by id when multiple targets overlap
+      const seen = new Set<number>()
+      const deduped: PullRequest[] = []
+      for (const pr of merged) {
+        if (!seen.has(pr.id)) {
+          seen.add(pr.id)
+          deduped.push(pr)
+        }
+      }
+      return deduped
+    })
   }
 }
