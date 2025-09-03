@@ -98,6 +98,12 @@ export function computePersonRollups(
     if (!hasAuthored) notes.push("Authored PR metrics suppressed (n < nThreshold)");
     if (!hasReviewed) notes.push("Review participation metrics suppressed (n < nThreshold)");
 
+    // Directional notes for small samples within [nThreshold, nThreshold+2]
+    const dirUpper = threshold + 2;
+    if (hasWi && wiAgg && wiAgg.count <= dirUpper) notes.push(`Directional (n=${wiAgg.count})`);
+    if (hasAuthored && authored.count <= dirUpper) notes.push(`Directional (n=${authored.count})`);
+    if (hasReviewed && reviewed.count <= dirUpper) notes.push(`Directional (n=${reviewed.count})`);
+
     const entry: PersonRollup = {
       person: p,
       team,
