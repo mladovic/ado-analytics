@@ -7,8 +7,9 @@ import {
   WorkItemUpdateSchema as ZWorkItemUpdate,
   PullRequestSchema as ZPullRequest,
   PRThreadSchema as ZPRThread,
+  PRReviewerSchema as ZPRReviewer,
 } from "~/models/zod-ado";
-import type { WorkItem, WorkItemUpdate, PullRequest, PRThread } from "~/models/zod-ado";
+import type { WorkItem, WorkItemUpdate, PullRequest, PRThread, PRReviewer } from "~/models/zod-ado";
 
 // Small stable hash (FNV-1a 32-bit) for cache keys
 function hashString(input: string): string {
@@ -223,6 +224,24 @@ export class AdoClient {
         : undefined;
       if (!Array.isArray(arr)) throw new Error("Invalid PRThreads response shape");
       return (arr as unknown[]).map((it) => ZPRThread.parse(it));
+    });
+  }
+
+  async listPRReviewers(prId: number): Promise<PRReviewer[]> {
+    const cacheKey = `reviewers:${prId}`;
+    return getOrSet<PRReviewer[]>(cacheKey, this.ttlMs, async () => {
+      const url = `${this.baseUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(
+        this.repoId
+      )}/pullRequests/${encodeURIComponent(String(prId))}/reviewers?api-version=7.1`;
+
+      const json = await adoFetchJson<unknown>(url);
+      const arr: unknown = Array.isArray(json)
+        ? json
+        : (json as any)?.value && Array.isArray((json as any).value)
+        ? (json as any).value
+        : undefined;
+      if (!Array.isArray(arr)) throw new Error("Invalid PRReviewers response shape");
+      return (arr as unknown[]).map((it) => ZPRReviewer.parse(it));
     });
   }
 }
