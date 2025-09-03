@@ -298,7 +298,7 @@ export class AdoClient {
    * - Normalizes fields and marks service accounts using configured regex/list
    * - Cached under key "graphUsers"
    */
-  async listGraphUsers(): Promise<
+  async listGraphUsers(options?: { bypass?: boolean }): Promise<
     Array<{
       id: string;
       displayName?: string;
@@ -380,7 +380,7 @@ export class AdoClient {
       } while (continuationToken);
 
       return users;
-    });
+    }, { bypass: options?.bypass });
   }
 
   /**
