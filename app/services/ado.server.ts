@@ -10,6 +10,7 @@ import {
   PRReviewerSchema as ZPRReviewer,
   PRIterationSchema as ZPRIteration,
   PolicyEvaluationSchema as ZPolicyEvaluation,
+  GraphUserSchema as ZGraphUser,
 } from "~/models/zod-ado";
 import type {
   WorkItem,
@@ -26,6 +27,7 @@ const API = {
   wit: "7.1",
   git: "7.1",
   policyPreview: "7.1-preview.1",
+  graph: "7.1-preview.1",
 } as const;
 
 // Normalize Azure DevOps list responses which often use { value: [] }
@@ -41,6 +43,7 @@ export class AdoClient {
   private readonly repoId: string;
   private readonly ttlMs: number;
   private readonly baseUrl: string;
+  private readonly graphBaseUrl: string;
 
   constructor() {
     const { ADO_ORG, ADO_PROJECT, ADO_REPO_ID, APP_CACHE_TTL_MS } = getServerEnv();
@@ -49,6 +52,7 @@ export class AdoClient {
     this.repoId = ADO_REPO_ID;
     this.ttlMs = APP_CACHE_TTL_MS;
     this.baseUrl = `https://dev.azure.com/${this.org}`;
+    this.graphBaseUrl = `https://vssps.dev.azure.com/${this.org}`;
   }
 
   /** Query work item IDs by WIQL string. */
@@ -281,6 +285,99 @@ export class AdoClient {
       const arr = asArray(json);
       if (!Array.isArray(arr)) throw new Error("Invalid PolicyEvaluations response shape");
       return (arr as unknown[]).map((it) => ZPolicyEvaluation.parse(it));
+    });
+  }
+
+  /**
+   * List all Graph users in the organization.
+   * - Base URL: vssps.dev.azure.com (Graph)
+   * - Handles paging via continuationToken
+   * - Validates each user with ZGraphUser
+   * - Normalizes fields and marks service accounts using configured regex/list
+   * - Cached under key "graphUsers"
+   */
+  async listGraphUsers(): Promise<
+    Array<{
+      id: string;
+      displayName?: string;
+      uniqueName?: string;
+      descriptor?: string;
+      isServiceAccount: boolean;
+    }>
+  > {
+    const cacheKey = `graphUsers`;
+    return getOrSet(cacheKey, this.ttlMs, async () => {
+      const users: Array<{
+        id: string;
+        displayName?: string;
+        uniqueName?: string;
+        descriptor?: string;
+        isServiceAccount: boolean;
+      }> = [];
+
+      // Build exclude matchers from env configuration (optional)
+      const regexStr =
+        process.env.EXCLUDE_USERS_REGEX || process.env.ADO_EXCLUDE_USERS_REGEX || process.env.APP_EXCLUDE_USERS_REGEX || "";
+      let excludeRe: RegExp | undefined;
+      if (regexStr) {
+        try {
+          excludeRe = new RegExp(regexStr, "i");
+        } catch {
+          // ignore invalid regex
+        }
+      }
+      const extrasStr =
+        process.env.EXCLUDE_USERS_EXTRA || process.env.ADO_EXCLUDE_USERS_EXTRA || process.env.APP_EXCLUDE_USERS_EXTRA || "";
+      const extraList = extrasStr
+        .split(/[\n,;]+/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      const isServiceAccount = (u: { uniqueName?: string; mailAddress?: string; displayName?: string; descriptor?: string }) => {
+        const candidates = [u.uniqueName, u.mailAddress, u.displayName, u.descriptor].filter(
+          (v): v is string => typeof v === "string" && v.length > 0
+        );
+        if (excludeRe && candidates.some((c) => excludeRe!.test(c))) return true;
+        if (extraList.length && candidates.some((c) => extraList.includes(c.toLowerCase()))) return true;
+        return false;
+      };
+
+      let continuationToken: string | undefined;
+      let safety = 0;
+      do {
+        let url = `${this.graphBaseUrl}/_apis/graph/users?api-version=${API.graph}`;
+        if (continuationToken) url += `&continuationToken=${encodeURIComponent(continuationToken)}`;
+
+        const json = await adoFetchJson<unknown>(url);
+        const arr = asArray(json);
+        if (!Array.isArray(arr)) throw new Error("Invalid GraphUsers response shape");
+
+        for (const it of arr as unknown[]) {
+          const gu = ZGraphUser.parse(it) as {
+            id: string;
+            displayName?: string;
+            uniqueName?: string;
+            mailAddress?: string;
+            descriptor?: string;
+          };
+          const uniqueName = gu.uniqueName ?? gu.mailAddress;
+          users.push({
+            id: gu.id,
+            displayName: gu.displayName,
+            uniqueName,
+            descriptor: gu.descriptor,
+            isServiceAccount: isServiceAccount(gu),
+          });
+        }
+
+        const token = (json as any)?.continuationToken;
+        continuationToken = typeof token === "string" && token.length > 0 ? token : undefined;
+
+        safety++;
+        if (safety > 200) throw new Error("Graph users paging exceeded safety limit");
+      } while (continuationToken);
+
+      return users;
     });
   }
 }
